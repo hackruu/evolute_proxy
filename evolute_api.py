@@ -3,18 +3,30 @@ import json
 import time
 import logging
 import threading
+import sys
 from flask import Flask, request, jsonify, abort
 from datetime import datetime
+from flask import Response
+from urllib.parse import urljoin
+
 
 LISTEN = os.getenv("LISTEN", "127.0.0.1")
 PORT = int(os.getenv("PORT", 12321))
 API_KEY = os.getenv("API_KEY", "change_me")
+API_KEY_RW = os.getenv("API_KEY_RW", "change_me_rw")
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
 REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 600))
-JSON_SUB = os.getenv("JSON_SUB", ".sensors.sensorsData")
+JSON_SUB = os.getenv("JSON_SUB", ".sensors")
 EVOLUTE_TOKEN_FILENAME = os.getenv("EVOLUTE_TOKEN_FILENAME", "evy-platform-access.txt")
 EVOLUTE_REFRESH_TOKEN_FILENAME = os.getenv("EVOLUTE_REFRESH_TOKEN_FILENAME", "evy-platform-refresh.txt")
 CAR_ID = os.getenv("CAR_ID", "SOME_CAR_ID_HASH_CHANGE_ME")
+
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/116.0.0.0 Safari/537.36"
+)
 
 DUMP_FILE = "dump.json"
 STATUS_FILE = "status.json"
@@ -102,7 +114,10 @@ def fetch_sensor_data():
             "evy-platform-access": tokens["access"],
             "evy-platform-refresh": tokens["refresh"]
         }
-        response = requests.get(EVOLUTE_SENSOR_URL, cookies=cookies, timeout=TIMEOUT)
+        headers = {
+            "User-Agent": USER_AGENT
+        }
+        response = requests.get(EVOLUTE_SENSOR_URL, headers=headers, cookies=cookies, timeout=TIMEOUT)
         response.raise_for_status()
         data = response.json()
         keys = JSON_SUB.strip(".").split(".")
@@ -114,7 +129,6 @@ def fetch_sensor_data():
         logger.info("Sensor data updated")
     except Exception as e:
         logger.error(f"Failed to fetch sensor data: {e}")
-
 
 def periodic_refresh():
     refresh_tokens()
@@ -131,6 +145,11 @@ def periodic_fetch():
 def check_auth(req):
     key = req.headers.get("X-API-Key") or req.args.get("api_key")
     if key != API_KEY:
+        abort(jsonify({"error": "Unauthorized"}), 401)
+
+def check_auth_rw(req):
+    key = req.headers.get("X-API-Key") or req.args.get("api_key")
+    if key != API_KEY_RW:
         abort(jsonify({"error": "Unauthorized"}), 401)
 
 @app.route("/ping", methods=["GET"])
@@ -170,15 +189,82 @@ def manual_refresh():
 @app.route("/sensors/all", methods=["GET"])
 def get_all_sensors():
     check_auth(request)
-    return jsonify(sensors_data)
+    sensors = sensors_data.get("sensorsData")
+    if sensors:
+        return jsonify(sensors)
+    else:
+        return jsonify({"error": "No sensors data available"}), 404
+
+@app.route("/position/all", methods=["GET"])
+def get_all_positions():
+    check_auth(request)
+    position = sensors_data.get("positionData")
+    if position:
+        return jsonify(position)
+    else:
+        return jsonify({"error": "No position data available"}), 404
 
 @app.route("/sensors/<string:sensor_name>", methods=["GET"])
 def get_single_sensor(sensor_name):
-    check_auth(request)
+    check_auth_rw(request)
     value = sensors_data.get(sensor_name)
     if value is None:
         return jsonify({"error": "sensor not found"}), 404
     return jsonify({sensor_name: value})
+
+@app.route("/geo/", methods=["GET"])
+def get_geo_data():
+    check_auth(request)
+    position = sensors_data.get("positionData")
+    if position:
+        return jsonify(position)
+    else:
+        return jsonify({"error": "No position data available"}), 404
+
+@app.route("/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+def proxy(subpath):
+    check_auth_rw(request)
+    tokens = get_tokens()
+    base_url = "https://app.evassist.ru/"
+    target_url = urljoin(base_url, subpath)
+
+    method = request.method
+    headers = {
+        "User-Agent": USER_AGENT
+    }
+    headers.update({
+        k: v for k, v in request.headers.items()
+        if k.lower() not in ["host", "content-length", "content-type", "x-api-key"]
+    })
+
+    if request.content_type:
+        headers["Content-Type"] = request.content_type
+
+    cookies = {
+        "evy-platform-access": tokens["access"],
+        "evy-platform-refresh": tokens["refresh"]
+    }
+
+    try:
+        resp = requests.request(
+            method,
+            target_url,
+            headers=headers,
+            params=request.args,
+            data=request.get_data(),
+            cookies=cookies,
+            timeout=TIMEOUT,
+            allow_redirects=False
+        )
+        excluded_headers = ["content-encoding", "transfer-encoding", "connection"]
+        response_headers = [
+            (name, value) for (name, value) in resp.raw.headers.items()
+            if name.lower() not in excluded_headers
+        ]
+        return Response(resp.content, resp.status_code, response_headers)
+    except Exception as e:
+        logger.error(f"Proxy request failed: {e}")
+        return jsonify({"error": "Proxy failed"}), 500
 
 @app.errorhandler(404)
 def not_found(e):
@@ -196,6 +282,10 @@ def handle_exception(e):
 import requests
 
 if __name__ == "__main__":
+    if CAR_ID == "SOME_CAR_ID_HASH_CHANGE_ME":
+        logger.error("Critical environment variable CAR_ID is not set. Exiting.")
+        sys.exit(1)
+
     start_timestamp = time.time()
 
     sensors_data = read_json_file(DUMP_FILE, default={})

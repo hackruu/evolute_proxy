@@ -1,0 +1,13 @@
+version: "3"
+services:
+  evolute_api:
+    restart: always
+    build: .
+    ports:
+      - "12321:12321"
+    environment:
+      LISTEN: 0.0.0.0
+      PORT: 12321
+      CAR_ID: "SOME_CAR_ID_HASH_CHANGE_ME"
+      API_KEY: "changeme"
+      API_KEY_RW: "changeme_rw"

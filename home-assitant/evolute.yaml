@@ -1,0 +1,192 @@
+  - sensor:
+      - name: "Evolute 12VBattery Voltage"
+        unique_id: evolute_12vbattery_voltage
+        state: "{{ state_attr('sensor.evolute_raw_data', '12VBatteryVoltage') }}"
+        unit_of_measurement: "V"
+        icon: mdi:battery
+
+      - name: "Evolute Battery Percentage"
+        unique_id: evolute_battery_percentage
+        state: "{{ state_attr('sensor.evolute_raw_data', 'batteryPercentage') }}"
+        unit_of_measurement: "%"
+        icon: mdi:battery
+
+      - name: "Evolute Remaining Mileage (Fuel)"
+        unique_id: evolute_remains_mileage_fuel
+        state: "{{ state_attr('sensor.evolute_raw_data', 'remainsMileageFuel') }}"
+        unit_of_measurement: "km"
+        icon: mdi:gas-station
+
+      - name: "Evolute Remaining Mileage (Battery)"
+        unique_id: evolute_remains_mileage_battery
+        state: "{{ state_attr('sensor.evolute_raw_data', 'remainsMileage') }}"
+        unit_of_measurement: "km"
+        icon: mdi:map-marker-distance
+
+      - name: "Evolute Outside Temperature"
+        unique_id: evolute_outside_temp
+        state: "{{ state_attr('sensor.evolute_raw_data', 'outsideTemp') }}"
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer
+
+      - name: "Evolute Fuel Percentage"
+        unique_id: evolute_fuel_percentage
+        state: "{{ state_attr('sensor.evolute_raw_data', 'fuelPercentage') }}"
+        unit_of_measurement: "%"
+        icon: mdi:fuel
+
+      - name: "Evolute Battery Temperature"
+        unique_id: evolute_battery_temp
+        state: "{{ state_attr('sensor.evolute_raw_data', 'batteryTemp') }}"
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer
+
+      - name: "Evolute Coolant Temperature"
+        unique_id: evolute_coolant_temp
+        state: "{{ state_attr('sensor.evolute_raw_data', 'coolantTemp') }}"
+        unit_of_measurement: "°C"
+        icon: mdi:coolant-temperature
+
+      - name: "Evolute Inboard Temperature"
+        unique_id: evolute_inboard_temp
+        state: "{{ state_attr('sensor.evolute_raw_data', 'inBoardTemp') }}"
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer-lines
+
+      - name: "Evolute Diagnostics Code"
+        unique_id: evolute_diagnostics_code
+        state: "{{ state_attr('sensor.evolute_raw_data', 'diagnostics') }}"
+        icon: mdi:alert-circle-outline
+
+      - name: "Evolute Tachometer"
+        unique_id: evolute_tachometer
+        state: "{{ state_attr('sensor.evolute_raw_data', 'tachometer') }}"
+        unit_of_measurement: "RPM"
+        icon: mdi:rotate-right
+
+      - name: "Evolute Odometer"
+        unique_id: evolute_odometer
+        state: "{{ state_attr('sensor.evolute_raw_data', 'odometer') }}"
+        unit_of_measurement: "km"
+        icon: mdi:rotate-right
+
+      - name: "Evolute Climate Fan Speed"
+        unique_id: evolute_climate_fan_speed
+        state: "{{ state_attr('sensor.evolute_raw_data', 'climateFanSpeed') }}"
+        unit_of_measurement: "Level"
+        icon: mdi:fan
+
+      - name: "Evolute Climate Target Temp"
+        unique_id: evolute_climate_target_temp
+        state: "{{ state_attr('sensor.evolute_raw_data', 'climateTargetTemp') }}"
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer
+
+      - name: "Evolute GPS Course"
+        unique_id: evolute_gps_course
+        state: "{{ state_attr('sensor.evolute_location_data', 'course') }}"
+        unit_of_measurement: "°"
+        icon: mdi:compass
+
+      - name: "Evolute HDOP"
+        unique_id: evolute_hdop
+        state: "{{ state_attr('sensor.evolute_location_data', 'hdop') }}"
+        icon: mdi:signal
+        unit_of_measurement: ""
+
+      - name: "Evolute Altitude"
+        unique_id: evolute_altitude
+        state: "{{ state_attr('sensor.evolute_location_data', 'height') }}"
+        unit_of_measurement: "m"
+        icon: mdi:image-filter-hdr
+
+      - name: "Evolute Latitude"
+        unique_id: evolute_latitude
+        state: "{{ state_attr('sensor.evolute_location_data', 'lat') }}"
+        unit_of_measurement: "°"
+        icon: mdi:map-marker
+
+      - name: "Evolute Longitude"
+        unique_id: evolute_longitude
+        state: "{{ state_attr('sensor.evolute_location_data', 'lon') }}"
+        unit_of_measurement: "°"
+        icon: mdi:map-marker
+
+      - name: "Evolute GPS Satellites"
+        unique_id: evolute_gps_sats
+        state: "{{ state_attr('sensor.evolute_location_data', 'sats') }}"
+        icon: mdi:satellite-variant
+        unit_of_measurement: "sats"
+
+      - name: "Evolute Speed"
+        unique_id: evolute_speed
+        state: "{{ state_attr('sensor.evolute_location_data', 'speed') }}"
+        unit_of_measurement: "km/h"
+        icon: mdi:speedometer
+
+  - binary_sensor:
+      - name: "Evolute Ignition On"
+        unique_id: evolute_ignition_on
+        state: "{{ state_attr('sensor.evolute_raw_data', 'ignitionStatus') | int == 1 }}"
+        device_class: power
+        icon: mdi:engine
+
+      - name: "Evolute Central Locking Engaged"
+        unique_id: evolute_central_locking
+        state: "{{ state_attr('sensor.evolute_raw_data', 'centralLockingStatus') | int != 1 }}"
+        device_class: lock
+        icon: mdi:lock
+
+      - name: "Evolute Ready Status"
+        unique_id: evolute_ready_status
+        state: "{{ state_attr('sensor.evolute_raw_data', 'ready') | int == 1 }}"
+        device_class: plug
+        icon: mdi:car-electric
+
+      - name: "Evolute Door Front Left Open"
+        unique_id: evolute_door_fl_open
+        state: "{{ state_attr('sensor.evolute_raw_data', 'doorFLStatus') | int == 1 }}"
+        device_class: door
+        icon: mdi:car-door
+
+      - name: "Evolute Door Front Right Open"
+        unique_id: evolute_door_fr_open
+        state: "{{ state_attr('sensor.evolute_raw_data', 'doorFRStatus') | int == 1 }}"
+        device_class: door
+        icon: mdi:car-door
+
+      - name: "Evolute Door Rear Left Open"
+        unique_id: evolute_door_rl_open
+        state: "{{ state_attr('sensor.evolute_raw_data', 'doorRLStatus') | int == 1 }}"
+        device_class: door
+        icon: mdi:car-door
+
+      - name: "Evolute Door Rear Right Open"
+        unique_id: evolute_door_rr_open
+        state: "{{ state_attr('sensor.evolute_raw_data', 'doorRRStatus') | int == 1 }}"
+        device_class: door
+        icon: mdi:car-door
+
+      - name: "Evolute Trunk Open"
+        unique_id: evolute_trunk_open
+        state: "{{ state_attr('sensor.evolute_raw_data', 'trunkStatus') | int == 1 }}"
+        device_class: garage_door
+        icon: mdi:car-back
+
+      - name: "Evolute Headlights On"
+        unique_id: evolute_headlights_on
+        state: "{{ state_attr('sensor.evolute_raw_data', 'headLightsStatus') | int == 1 }}"
+        device_class: light
+        icon: mdi:car-light-high
+
+      - name: "Evolute Climate On"
+        unique_id: evolute_climate_on
+        state: "{{ state_attr('sensor.evolute_raw_data', 'climateStatus') | int == 1 }}"
+        device_class: heat
+        icon: mdi:air-conditioner
+
+      - name: "Evolute Climate Front Defrost"
+        unique_id: evolute_climate_front_defrost
+        state: "{{ state_attr('sensor.evolute_raw_data', 'climateFWindowStatus') | int == 1 }}"
+        device_class: cold
+        icon: mdi:car-windshield

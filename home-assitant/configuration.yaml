@@ -1,0 +1,11 @@
+# ....... 
+template: !include evolute.yaml
+
+# modify api key here
+input_text:
+  evolute_proxy_token:
+    initial: "changeme"
+
+# modify address here
+rest: !include evolute_rest.yaml
+# ......

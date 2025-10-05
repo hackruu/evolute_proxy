@@ -1,0 +1,58 @@
+# modify ip-address here and in the next section
+  - resource: http://192.168.1.254:12321/sensors/all
+    method: GET
+    headers:
+      X-API-Key: "{{ states('input_text.evolute_proxy_token') }}"
+    scan_interval: 60
+    sensor:
+      - name: "Evolute Raw Data"
+        unique_id: evolute_raw_data
+        value_template: "{{ value_json.diagnostics }}"
+        unit_of_measurement: "km"
+        icon: mdi:speedometer
+        json_attributes:
+          - odometer
+          - batteryPercentage
+          - remainsMileageFuel
+          - outsideTemp
+          - fuelPercentage
+          - batteryTemp
+          - coolantTemp
+          - inBoardTemp
+          - centralLockingStatus
+          - ready
+          - tachometer
+          - diagnostics
+          - remainsMileage
+          - ignitionStatus
+          - doorFLStatus
+          - doorFRStatus
+          - doorRLStatus
+          - doorRRStatus
+          - trunkStatus
+          - headLightsStatus
+          - 12VBatteryVoltage
+          - climateFWindowStatus
+          - climateFanSpeed
+          - climateStatus
+          - climateTargetTemp
+# here
+  - resource: http://192.168.1.254:12321/position/all
+    method: GET
+    headers:
+      X-API-Key: "{{ states('input_text.evolute_proxy_token') }}"
+    scan_interval: 60
+    sensor:
+      - name: "Evolute Location Data"
+        unique_id: evolute_location_data
+        value_template: "{{ value_json.speed }}"
+        unit_of_measurement: "km/h"
+        icon: mdi:speedometer
+        json_attributes:
+          - course
+          - hdop
+          - height
+          - lat
+          - lon
+          - sats
+          - speed
