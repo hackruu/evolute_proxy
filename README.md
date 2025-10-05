@@ -114,5 +114,5 @@ bash set_token.sh
 
 ## Настройка Home assistant
 
-- Пример лежит в home-assistant.yaml
+- Пример лежит в директории home-assistant
 - TODO нормально описать что нужно сделать для новичков
