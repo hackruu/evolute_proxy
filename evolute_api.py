@@ -212,15 +212,6 @@ def get_single_sensor(sensor_name):
         return jsonify({"error": "sensor not found"}), 404
     return jsonify({sensor_name: value})
 
-@app.route("/geo/", methods=["GET"])
-def get_geo_data():
-    check_auth(request)
-    position = sensors_data.get("positionData")
-    if position:
-        return jsonify(position)
-    else:
-        return jsonify({"error": "No position data available"}), 404
-
 @app.route("/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 def proxy(subpath):
     check_auth_rw(request)
