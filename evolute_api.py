@@ -257,6 +257,36 @@ def proxy(subpath):
         logger.error(f"Proxy request failed: {e}")
         return jsonify({"error": "Proxy failed"}), 500
 
+@app.route("/tbox/<string:action>", methods=["POST"])
+def tbox_action(action):
+    check_auth_rw(request)
+    tokens = get_tokens()
+    target_url = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/{action}"
+
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json"
+    }
+
+    cookies = {
+        "evy-platform-access": tokens["access"],
+        "evy-platform-refresh": tokens["refresh"]
+    }
+
+    try:
+        resp = requests.post(
+            target_url,
+            headers=headers,
+            data=request.get_data(),
+            cookies=cookies,
+            timeout=TIMEOUT
+        )
+        resp.raise_for_status()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        logger.error(f"TBox action request failed: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
