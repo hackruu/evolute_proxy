@@ -34,6 +34,21 @@ STATUS_FILE = "status.json"
 EVOLUTE_REFRESH_URL = "https://app.evassist.ru/id-service/auth/refresh-token"
 EVOLUTE_SENSOR_URL = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/info"
 
+INTELLIGENT_ACTIONS = {
+    "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),
+    "lock_open": ("centralLockingToggle", "centralLockingStatus", 0),
+    "heating_off": ("heating", "climateStatus", 1),
+    "heating_on": ("heating", "climateStatus", 0),
+    "cooling_off": ("cooling", "climateStatus", 1),
+    "cooling_on": ("cooling", "climateStatus", 0),
+    "trunk_close": ("trunkOpen", "trunkStatus", 1),
+    "trunk_open": ("trunkOpen", "trunkStatus", 0),
+    "prepare_on": ("PREPARE", "ignitionStatus", 0),
+    "prepare_off": ("CANCEL", "ignitionStatus", 1),
+    "blink": ("blink", "ready", 0),
+}
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="[%(levelname)s] %(asctime)s %(message)s"
@@ -286,6 +301,52 @@ def tbox_action(action):
     except Exception as e:
         logger.error(f"TBox action request failed: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/tbox-i/<string:action>", methods=["POST"])
+def tbox_i_action(action):
+    check_auth_rw(request)
+
+    if action not in INTELLIGENT_ACTIONS:
+        return jsonify({"status": "error", "error": f"Unknown intelligent action: {action}"}), 400
+
+    endpoint, status_key, skip_if_value = INTELLIGENT_ACTIONS[action]
+
+    try:
+        fetch_sensor_data()
+        current_value = sensors_data.get("sensorsData", {}).get(status_key)
+
+        if current_value == skip_if_value:
+            logger.info(f"Intelligent action '{action}' skipped: already in desired state")
+            return jsonify({"status": "already_ok"})
+
+        target_url = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/{endpoint}"
+        tokens = get_tokens()
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Content-Type": "application/json"
+        }
+        cookies = {
+            "evy-platform-access": tokens["access"],
+            "evy-platform-refresh": tokens["refresh"]
+        }
+
+        resp = requests.post(
+            target_url,
+            headers=headers,
+            data=request.get_data(),
+            cookies=cookies,
+            timeout=TIMEOUT
+        )
+        resp.raise_for_status()
+        logger.info(f"Intelligent action '{action}' executed successfully")
+        fetch_sensor_data()
+
+        return jsonify({"status": "success"})
+
+    except Exception as e:
+        logger.error(f"Intelligent action '{action}' failed: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 
 @app.errorhandler(404)
 def not_found(e):
