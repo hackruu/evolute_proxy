@@ -45,7 +45,7 @@ INTELLIGENT_ACTIONS = {
     "trunk_open": ("trunkOpen", "trunkStatus", 0),
     "prepare_on": ("PREPARE", "ignitionStatus", 0),
     "prepare_off": ("CANCEL", "ignitionStatus", 1),
-    "blink": ("blink", "ready", 0),
+    "blink": ("blink", "ready", 1),
 }
 
 
