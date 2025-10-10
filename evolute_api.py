@@ -37,14 +37,14 @@ EVOLUTE_SENSOR_URL = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/info"
 INTELLIGENT_ACTIONS = {
     "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),
     "lock_open": ("centralLockingToggle", "centralLockingStatus", 0),
-    "heating_off": ("heating", "climateStatus", 1),
-    "heating_on": ("heating", "climateStatus", 0),
-    "cooling_off": ("cooling", "climateStatus", 1),
-    "cooling_on": ("cooling", "climateStatus", 0),
-    "trunk_close": ("trunkOpen", "trunkStatus", 1),
-    "trunk_open": ("trunkOpen", "trunkStatus", 0),
-    "prepare_on": ("PREPARE", "ignitionStatus", 0),
-    "prepare_off": ("CANCEL", "ignitionStatus", 1),
+    "heating_off": ("heating", "climateStatus", 0),
+    "heating_on": ("heating", "climateStatus", 1),
+    "cooling_off": ("cooling", "climateStatus", 0),
+    "cooling_on": ("cooling", "climateStatus", 1),
+    "trunk_close": ("trunkOpen", "trunkStatus", 0),
+    "trunk_open": ("trunkOpen", "trunkStatus", 1),
+    "prepare_on": ("PREPARE", "ignitionStatus", 1),
+    "prepare_off": ("CANCEL", "ignitionStatus", 0),
     "blink": ("blink", "ready", 1),
 }
 
