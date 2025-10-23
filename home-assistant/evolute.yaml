@@ -4,54 +4,63 @@
         state: "{{ state_attr('sensor.evolute_raw_data', '12VBatteryVoltage') }}"
         unit_of_measurement: "V"
         icon: mdi:battery
+        state_class: measurement
 
       - name: "Evolute Battery Percentage"
         unique_id: evolute_battery_percentage
         state: "{{ state_attr('sensor.evolute_raw_data', 'batteryPercentage') }}"
         unit_of_measurement: "%"
         icon: mdi:battery
+        state_class: measurement
 
       - name: "Evolute Remaining Mileage (Fuel)"
         unique_id: evolute_remains_mileage_fuel
         state: "{{ state_attr('sensor.evolute_raw_data', 'remainsMileageFuel') }}"
         unit_of_measurement: "km"
         icon: mdi:gas-station
+        state_class: measurement
 
       - name: "Evolute Remaining Mileage (Battery)"
         unique_id: evolute_remains_mileage_battery
         state: "{{ state_attr('sensor.evolute_raw_data', 'remainsMileage') }}"
         unit_of_measurement: "km"
         icon: mdi:map-marker-distance
+        state_class: measurement
 
       - name: "Evolute Outside Temperature"
         unique_id: evolute_outside_temp
         state: "{{ state_attr('sensor.evolute_raw_data', 'outsideTemp') }}"
         unit_of_measurement: "°C"
         icon: mdi:thermometer
+        state_class: measurement
 
       - name: "Evolute Fuel Percentage"
         unique_id: evolute_fuel_percentage
         state: "{{ state_attr('sensor.evolute_raw_data', 'fuelPercentage') }}"
         unit_of_measurement: "%"
         icon: mdi:fuel
+        state_class: measurement
 
       - name: "Evolute Battery Temperature"
         unique_id: evolute_battery_temp
         state: "{{ state_attr('sensor.evolute_raw_data', 'batteryTemp') }}"
         unit_of_measurement: "°C"
         icon: mdi:thermometer
+        state_class: measurement
 
       - name: "Evolute Coolant Temperature"
         unique_id: evolute_coolant_temp
         state: "{{ state_attr('sensor.evolute_raw_data', 'coolantTemp') }}"
         unit_of_measurement: "°C"
         icon: mdi:coolant-temperature
+        state_class: measurement
 
       - name: "Evolute Inboard Temperature"
         unique_id: evolute_inboard_temp
         state: "{{ state_attr('sensor.evolute_raw_data', 'inBoardTemp') }}"
         unit_of_measurement: "°C"
         icon: mdi:thermometer-lines
+        state_class: measurement
 
       - name: "Evolute Diagnostics Code"
         unique_id: evolute_diagnostics_code
@@ -63,66 +72,77 @@
         state: "{{ state_attr('sensor.evolute_raw_data', 'tachometer') }}"
         unit_of_measurement: "RPM"
         icon: mdi:rotate-right
+        state_class: measurement
 
       - name: "Evolute Odometer"
         unique_id: evolute_odometer
         state: "{{ state_attr('sensor.evolute_raw_data', 'odometer') }}"
         unit_of_measurement: "km"
         icon: mdi:rotate-right
+        state_class: total_increasing
 
       - name: "Evolute Climate Fan Speed"
         unique_id: evolute_climate_fan_speed
         state: "{{ state_attr('sensor.evolute_raw_data', 'climateFanSpeed') }}"
         unit_of_measurement: "Level"
         icon: mdi:fan
+        state_class: measurement
 
       - name: "Evolute Climate Target Temp"
         unique_id: evolute_climate_target_temp
         state: "{{ state_attr('sensor.evolute_raw_data', 'climateTargetTemp') }}"
         unit_of_measurement: "°C"
         icon: mdi:thermometer
+        state_class: measurement
 
       - name: "Evolute GPS Course"
         unique_id: evolute_gps_course
         state: "{{ state_attr('sensor.evolute_location_data', 'course') }}"
         unit_of_measurement: "°"
         icon: mdi:compass
+        state_class: measurement
 
       - name: "Evolute HDOP"
         unique_id: evolute_hdop
         state: "{{ state_attr('sensor.evolute_location_data', 'hdop') }}"
         icon: mdi:signal
         unit_of_measurement: ""
+        state_class: measurement
 
       - name: "Evolute Altitude"
         unique_id: evolute_altitude
         state: "{{ state_attr('sensor.evolute_location_data', 'height') }}"
         unit_of_measurement: "m"
         icon: mdi:image-filter-hdr
+        state_class: measurement
 
       - name: "Evolute Latitude"
         unique_id: evolute_latitude
         state: "{{ state_attr('sensor.evolute_location_data', 'lat') }}"
         unit_of_measurement: "°"
         icon: mdi:map-marker
+        state_class: measurement
 
       - name: "Evolute Longitude"
         unique_id: evolute_longitude
         state: "{{ state_attr('sensor.evolute_location_data', 'lon') }}"
         unit_of_measurement: "°"
         icon: mdi:map-marker
+        state_class: measurement
 
       - name: "Evolute GPS Satellites"
         unique_id: evolute_gps_sats
         state: "{{ state_attr('sensor.evolute_location_data', 'sats') }}"
         icon: mdi:satellite-variant
         unit_of_measurement: "sats"
+        state_class: measurement
 
       - name: "Evolute Speed"
         unique_id: evolute_speed
         state: "{{ state_attr('sensor.evolute_location_data', 'speed') }}"
         unit_of_measurement: "km/h"
         icon: mdi:speedometer
+        state_class: measurement
 
   - binary_sensor:
       - name: "Evolute Ignition On"
