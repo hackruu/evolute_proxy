@@ -15,7 +15,7 @@ PORT = int(os.getenv("PORT", 12321))
 API_KEY = os.getenv("API_KEY", "change_me")
 API_KEY_RW = os.getenv("API_KEY_RW", "change_me_rw")
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
-REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 600))
+REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 1200))
 JSON_SUB = os.getenv("JSON_SUB", ".sensors")
 EVOLUTE_TOKEN_FILENAME = os.getenv("EVOLUTE_TOKEN_FILENAME", "evy-platform-access.txt")
 EVOLUTE_REFRESH_TOKEN_FILENAME = os.getenv("EVOLUTE_REFRESH_TOKEN_FILENAME", "evy-platform-refresh.txt")
@@ -25,7 +25,7 @@ CAR_ID = os.getenv("CAR_ID", "SOME_CAR_ID_HASH_CHANGE_ME")
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/116.0.0.0 Safari/537.36"
+    "Chrome/144.0.0.0 Safari/537.36"
 )
 
 DUMP_FILE = "dump.json"
