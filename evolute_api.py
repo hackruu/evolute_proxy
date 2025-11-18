@@ -15,7 +15,8 @@ PORT = int(os.getenv("PORT", 12321))
 API_KEY = os.getenv("API_KEY", "change_me")
 API_KEY_RW = os.getenv("API_KEY_RW", "change_me_rw")
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
-REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 1200))
+REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 600))
+SENSORS_REFRESH_INTERVAL = int(os.getenv("SENSORS_REFRESH_INTERVAL", 120))
 JSON_SUB = os.getenv("JSON_SUB", ".sensors")
 EVOLUTE_TOKEN_FILENAME = os.getenv("EVOLUTE_TOKEN_FILENAME", "evy-platform-access.txt")
 EVOLUTE_REFRESH_TOKEN_FILENAME = os.getenv("EVOLUTE_REFRESH_TOKEN_FILENAME", "evy-platform-refresh.txt")
@@ -153,7 +154,7 @@ def periodic_refresh():
 
 def periodic_fetch():
     fetch_sensor_data()
-    t = threading.Timer(60, periodic_fetch)
+    t = threading.Timer(SENSORS_REFRESH_INTERVAL, periodic_fetch)
     t.daemon = True
     t.start()
 
