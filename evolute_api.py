@@ -4,6 +4,7 @@ import time
 import logging
 import threading
 import sys
+import requests
 from flask import Flask, request, jsonify, abort
 from datetime import datetime
 from flask import Response
@@ -22,6 +23,7 @@ EVOLUTE_TOKEN_FILENAME = os.getenv("EVOLUTE_TOKEN_FILENAME", "evy-platform-acces
 EVOLUTE_REFRESH_TOKEN_FILENAME = os.getenv("EVOLUTE_REFRESH_TOKEN_FILENAME", "evy-platform-refresh.txt")
 CAR_ID = os.getenv("CAR_ID", "SOME_CAR_ID_HASH_CHANGE_ME")
 
+current_refresh_interval = REFRESH_INTERVAL
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -103,18 +105,34 @@ def update_status(key):
     write_json_file(STATUS_FILE, status_info)
 
 def refresh_tokens():
-    global tokens_ok
+    global tokens_ok, current_refresh_interval
     try:
         tokens = get_tokens()
         payload = {"refreshToken": tokens["refresh"]}
         response = requests.post(EVOLUTE_REFRESH_URL, json=payload, timeout=TIMEOUT)
         response.raise_for_status()
+
         data = response.json()
         save_token(EVOLUTE_TOKEN_FILENAME, data["accessToken"])
         save_token(EVOLUTE_REFRESH_TOKEN_FILENAME, data["refreshToken"])
         update_status("last_token_update")
         tokens_ok = True
-        logger.info("Tokens refreshed successfully")
+
+        if current_refresh_interval != REFRESH_INTERVAL:
+            logger.info(f"Token refresh successful. Resetting interval to {REFRESH_INTERVAL}s")
+            current_refresh_interval = REFRESH_INTERVAL
+        else:
+            logger.info("Tokens refreshed successfully")
+
+    except requests.exceptions.HTTPError as e:
+        tokens_ok = False
+        if e.response is not None and e.response.status_code == 403:
+            new_interval = min(current_refresh_interval * 2, 3600)
+            logger.warning(f"403 Forbidden during token refresh. Increasing cooldown from {current_refresh_interval}s to {new_interval}s")
+            current_refresh_interval = new_interval
+        else:
+            logger.error(f"HTTP error refreshing tokens: {e}")
+
     except Exception as e:
         tokens_ok = False
         logger.error(f"Failed to refresh tokens: {e}")
@@ -148,7 +166,7 @@ def fetch_sensor_data():
 
 def periodic_refresh():
     refresh_tokens()
-    t = threading.Timer(REFRESH_INTERVAL, periodic_refresh)
+    t = threading.Timer(current_refresh_interval, periodic_refresh)
     t.daemon = True
     t.start()
 
@@ -181,11 +199,13 @@ def status():
         "start_time": status_info["start_time"],
         "last_token_update": status_info["last_token_update"],
         "last_sensor_update": status_info["last_sensor_update"],
-        "tokens_active": tokens_ok
+        "tokens_active": tokens_ok,
+        "current_refresh_interval": current_refresh_interval
     })
 
 @app.route("/set_tokens", methods=["POST"])
 def set_tokens():
+    global current_refresh_interval
     check_auth(request)
     data = request.get_json(force=True)
     access = data.get("access")
@@ -194,13 +214,16 @@ def set_tokens():
         save_token(EVOLUTE_TOKEN_FILENAME, access)
     if refresh:
         save_token(EVOLUTE_REFRESH_TOKEN_FILENAME, refresh)
+
+    current_refresh_interval = REFRESH_INTERVAL
+
     return jsonify({"status": "tokens updated"})
 
 @app.route("/manual_refresh", methods=["POST"])
 def manual_refresh():
     check_auth(request)
     refresh_tokens()
-    return jsonify({"status": "refreshed"})
+    return jsonify({"status": "refreshed", "interval": current_refresh_interval})
 
 @app.route("/sensors/all", methods=["GET"])
 def get_all_sensors():
@@ -361,8 +384,6 @@ def method_not_allowed(e):
 def handle_exception(e):
     logger.error(f"Unhandled error: {e}")
     return jsonify({"error": "Internal Server Error"}), 500
-
-import requests
 
 if __name__ == "__main__":
     if CAR_ID == "SOME_CAR_ID_HASH_CHANGE_ME":
