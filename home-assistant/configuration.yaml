@@ -9,3 +9,5 @@ input_text:
 # modify address here
 rest: !include evolute_rest.yaml
 # ......
+
+sensor: !include sensors.yaml

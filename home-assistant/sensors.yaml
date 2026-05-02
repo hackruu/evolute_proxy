@@ -1,0 +1,7 @@
+- platform: derivative
+  name: evolute_battery_charge_rate
+  unique_id: evolute_battery_charge_rate
+  source: sensor.evolute_battery_percentage
+  unit_time: h
+  time_window: "00:15:00"
+  round: 3

@@ -144,6 +144,20 @@
         icon: mdi:speedometer
         state_class: measurement
 
+      - name: "Evolute Time To 100%"
+        unique_id: evolute_time_to_full
+        unit_of_measurement: "h"
+        state_class: measurement
+        state: >
+          {% set battery = states('sensor.evolute_battery_percentage') | float(0) %}
+          {% set rate = states('sensor.evolute_battery_charge_rate') | float(0) %}
+          {% set remaining = 100 - battery %}
+          {% if rate > 0 and remaining > 0 %}
+            {{ (remaining / rate) | round(2) }}
+          {% else %}
+            {{ none }}
+          {% endif %}
+
   - binary_sensor:
       - name: "Evolute Ignition On"
         unique_id: evolute_ignition_on
