@@ -30,7 +30,41 @@
 
 - /position/all — получение данных о текущем местоположении автомобиля.
 
-- /proxy/ — проксирование запросов к внешнему API Evolute.
+- /proxy/ — проксирование запросов к внешнему API, через эндпойнт /proxy/, скрывая реальный ключ доступа.
+
+- /travels/search — история поездок (passthrough к облачному car-service/travels/search). Body необязателен — по умолчанию вся история, последние поездки первыми:
+
+  ```
+  curl -X POST http://localhost:12321/travels/search \
+       -H "X-API-Key: $API_KEY" \
+       -H "Content-Type: application/json" \
+       -d '{"filters":[{"key":"PERIOD","values":["MONTH"]}], "limit":50, "offset":0}'
+  ```
+
+  PERIOD: ALL | TODAY | YESTERDAY | WEEK | MONTH; вместо него можно задать
+  произвольный диапазон: `{"key":"DATE_START","values":[<epoch-ms>]}` и
+  `DATE_END`. Ответ: `{"rows":[{id, startDate, endDate, odometer{first,last},
+  battery{first,last}, fuel{...}, duration, distance, batteryConsumption}],
+  "total", "offset", "limit"}`.
+
+- /travels/details/<trip_id> — детали поездки с GPS-треком:
+  `points: [{lat, lon, time}]` (до точки в секунду). Обязателен параметр
+  `?startTime=<segmentStartTime из /travels/search>` (unix-секунды):
+
+  ```
+  curl "http://localhost:12321/travels/details/294?startTime=1789397569" -H "X-API-Key: $API_KEY"
+  ```
+
+- /telemetry-commands — официальный command-queue облака (нужен RW-ключ):
+  `POST {"commandName": str, "imei": str, "value": ...}` -> `{"commandId": ...}`,
+  далее статус исполнения — `GET /telemetry-commands/<commandId>` (RO-ключ).
+  В отличие от /tbox/ позволяет не только отправить команду, но и узнать,
+  исполнил ли её TBOX. Список валидных commandName/imei зависит от авто —
+  уточняйте трафиком веб-кабинета.
+
+- /history/sensors — серверная история снапшотов сенсоров (см. HISTORY_DB ниже):
+  `?from=<unix-sec>&to=<unix-sec>&limit=<n>`, по умолчанию последние 24 ч.
+  Работает, только если HISTORY_DB задан.
 
 ## Как это работает
 
@@ -95,6 +129,8 @@
 | `JSON_SUB`     | Путь к данным сенсоров в JSON-ответе (по умолчанию `.sensors`).          |
 | `EVOLUTE_TOKEN_FILENAME` | Имя файла для сохранения токена доступа.                        |
 | `EVOLUTE_REFRESH_TOKEN_FILENAME` | Имя файла для сохранения токена обновления.                |
+| `HISTORY_DB`   | Путь к файлу SQLite для серверной истории снапшотов. По умолчанию пусто — история выключена, поведение прокси не меняется. Каждый успешный опрос сенсоров добавляет строку, устаревшие удаляются по `HISTORY_RETENTION_DAYS`. |
+| `HISTORY_RETENTION_DAYS` | Сколько дней хранить историю (по умолчанию `90`).               |
 
 
 > ⚠️⚠️⚠️ Приложение не запустится, если `CAR_ID` не задан или оставлен со значением по умолчанию (`SOME_CAR_ID_HASH_CHANGE_ME`).

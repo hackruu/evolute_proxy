@@ -4,8 +4,10 @@ import time
 import logging
 import threading
 import sys
+import sqlite3
 import requests
 from flask import Flask, request, jsonify, abort
+from werkzeug.exceptions import HTTPException
 from datetime import datetime
 from flask import Response
 from urllib.parse import urljoin
@@ -36,6 +38,15 @@ STATUS_FILE = "status.json"
 
 EVOLUTE_REFRESH_URL = "https://app.evassist.ru/id-service/auth/refresh-token"
 EVOLUTE_SENSOR_URL = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/info"
+EVOLUTE_TRAVELS_SEARCH_URL = f"https://app.evassist.ru/car-service/travels/search/{CAR_ID}"
+EVOLUTE_TRAVELS_DETAILS_URL = f"https://app.evassist.ru/car-service/travels/details/{CAR_ID}"
+EVOLUTE_TELEMETRY_COMMANDS_URL = "https://app.evassist.ru/client-bff-service/telemetry-commands"
+
+# Опциональная серверная история снапшотов: путь к файлу SQLite.
+# Пусто (по умолчанию) — история выключена, поведение прокси не меняется.
+HISTORY_DB = os.getenv("HISTORY_DB", "")
+HISTORY_RETENTION_DAYS = int(os.getenv("HISTORY_RETENTION_DAYS", 90))
+TRAVELS_DEFAULT_LIMIT = 20
 
 INTELLIGENT_ACTIONS = {
     "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),
@@ -70,11 +81,13 @@ tokens_ok = False
 start_timestamp = time.time()
 
 def read_json_file(filename, default=None):
+    if default is None:
+        default = {}
     try:
         with open(filename, "r") as f:
             return json.load(f)
     except Exception:
-        return default or {}
+        return default
 
 def write_json_file(filename, data):
     try:
@@ -160,9 +173,102 @@ def fetch_sensor_data():
         sensors_data = data
         update_status("last_sensor_update")
         write_json_file(DUMP_FILE, sensors_data)
+        append_history(sensors_data)
         logger.info("Sensor data updated")
     except Exception as e:
         logger.error(f"Failed to fetch sensor data: {e}")
+
+
+# --- Серверная история снапшотов (опционально, HISTORY_DB) ---
+# Каждый успешный fetch_sensor_data кладёт снапшот в SQLite. Клиент может
+# забрать ряд задним числом через /history/sensors, даже пока приложение
+# не запущено. Ключ строки — time из ответа облака (unix-секунды).
+
+def append_history(snapshot):
+    if not HISTORY_DB:
+        return
+    try:
+        ts = int(snapshot.get("time") or time.time())
+        conn = sqlite3.connect(HISTORY_DB, timeout=30)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS snapshots ("
+                "ts INTEGER PRIMARY KEY, payload TEXT NOT NULL)"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO snapshots (ts, payload) VALUES (?, ?)",
+                (ts, json.dumps(snapshot)),
+            )
+            conn.execute(
+                "DELETE FROM snapshots WHERE ts < ?",
+                (ts - HISTORY_RETENTION_DAYS * 86400,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"History append failed: {e}")
+
+
+def get_history(from_ts, to_ts, limit):
+    if not HISTORY_DB:
+        return []
+    try:
+        conn = sqlite3.connect(HISTORY_DB, timeout=30)
+        try:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS snapshots ("
+                "ts INTEGER PRIMARY KEY, payload TEXT NOT NULL)"
+            )
+            rows = conn.execute(
+                "SELECT payload FROM snapshots "
+                "WHERE ts >= ? AND ts <= ? ORDER BY ts ASC LIMIT ?",
+                (from_ts, to_ts, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [json.loads(payload) for (payload,) in rows]
+    except Exception as e:
+        logger.error(f"History read failed: {e}")
+        return []
+
+
+def travels_search_body(raw):
+    """Дефолты для /travels/search: пустой body -> вся история, последние поездки."""
+    raw = raw if isinstance(raw, dict) else {}
+    return {
+        "filters": raw.get("filters") or [{"key": "PERIOD", "values": ["ALL"]}],
+        "limit": raw.get("limit", TRAVELS_DEFAULT_LIMIT),
+        "offset": raw.get("offset", 0),
+        "sort": raw.get("sort") or {"by": "DATE", "dir": "DESC"},
+    }
+
+
+def upstream_json(method, url, **kw):
+    """Запрос к облаку с токенами; статус и body апстрима проходят как есть."""
+    tokens = get_tokens()
+    headers = kw.pop("headers", None) or {"User-Agent": USER_AGENT}
+    headers.setdefault("User-Agent", USER_AGENT)
+    cookies = {
+        "evy-platform-access": tokens["access"],
+        "evy-platform-refresh": tokens["refresh"],
+    }
+    try:
+        resp = requests.request(
+            method, url, headers=headers, cookies=cookies, timeout=TIMEOUT, **kw
+        )
+        return Response(
+            resp.content,
+            resp.status_code,
+            content_type=resp.headers.get("Content-Type", "application/json"),
+        )
+    except Exception as e:
+        logger.error(f"Upstream {method} {url} failed: {e}")
+        return Response(
+            json.dumps({"error": "Upstream request failed"}),
+            502,
+            content_type="application/json",
+        )
 
 def periodic_refresh():
     refresh_tokens()
@@ -179,12 +285,12 @@ def periodic_fetch():
 def check_auth(req):
     key = req.headers.get("X-API-Key") or req.args.get("api_key")
     if key != API_KEY:
-        abort(jsonify({"error": "Unauthorized"}), 401)
+        abort(401)
 
 def check_auth_rw(req):
     key = req.headers.get("X-API-Key") or req.args.get("api_key")
     if key != API_KEY_RW:
-        abort(jsonify({"error": "Unauthorized"}), 401)
+        abort(401)
 
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -200,7 +306,8 @@ def status():
         "last_token_update": status_info["last_token_update"],
         "last_sensor_update": status_info["last_sensor_update"],
         "tokens_active": tokens_ok,
-        "current_refresh_interval": current_refresh_interval
+        "current_refresh_interval": current_refresh_interval,
+        "history_enabled": bool(HISTORY_DB)
     })
 
 @app.route("/set_tokens", methods=["POST"])
@@ -296,6 +403,78 @@ def proxy(subpath):
         logger.error(f"Proxy request failed: {e}")
         return jsonify({"error": "Proxy failed"}), 500
 
+@app.route("/travels/search", methods=["POST"])
+def travels_search():
+    """История поездок (passthrough к /car-service/travels/search/<CAR_ID>).
+
+    Body полностью опционален; недостающее дополняется дефолтами:
+      {"filters": [{"key": "PERIOD", "values": ["ALL"]}],   # или DATE_START/DATE_END (epoch ms)
+       "limit": 20, "offset": 0, "sort": {"by": "DATE", "dir": "DESC"}}
+    Ответ облака проходит как есть: {"rows": [...], "total", "offset", "limit"}.
+    """
+    check_auth(request)
+    raw = request.get_json(silent=True) or {}
+    payload = travels_search_body(raw)
+    return upstream_json("POST", EVOLUTE_TRAVELS_SEARCH_URL, json=payload)
+
+
+@app.route("/travels/details/<int:trip_id>", methods=["GET"])
+def travels_details(trip_id):
+    """Детали поездки с GPS-треком (passthrough к .../travels/details/<CAR_ID>/<id>).
+
+    Обязателен ?startTime=<segmentStartTime из /travels/search> (unix-секунды),
+    иначе облако отвечает ValidateError. Ответ содержит points: [{lat, lon, time}].
+    """
+    check_auth(request)
+    start = request.args.get("startTime")
+    if start is None:
+        return jsonify({"error": "startTime is required (segmentStartTime from /travels/search)"}), 400
+    return upstream_json(
+        "GET", f"{EVOLUTE_TRAVELS_DETAILS_URL}/{trip_id}", params={"startTime": start}
+    )
+
+
+@app.route("/telemetry-commands", methods=["POST"])
+def telemetry_command_create():
+    """Официальный command-queue облака: POST -> {"commandId": ...}.
+
+    Body passthrough: {"commandName": str, "imei": str, "value": ...} — это
+    РЕАЛЬНАЯ команда на машину, поэтому ключ RW. Статус исполнения: проверить
+    GET /telemetry-commands/<commandId> (ключ RO).
+    """
+    check_auth_rw(request)
+    headers = {"User-Agent": USER_AGENT}
+    if request.content_type:
+        headers["Content-Type"] = request.content_type
+    return upstream_json(
+        "POST", EVOLUTE_TELEMETRY_COMMANDS_URL, headers=headers, data=request.get_data()
+    )
+
+
+@app.route("/telemetry-commands/<command_id>", methods=["GET"])
+def telemetry_command_status(command_id):
+    check_auth(request)
+    return upstream_json("GET", f"{EVOLUTE_TELEMETRY_COMMANDS_URL}/{command_id}")
+
+
+@app.route("/history/sensors", methods=["GET"])
+def history_sensors():
+    """Серверная история снапшотов (нужен запущенный HISTORY_DB).
+
+    ?from=<unix-sec>&to=<unix-sec>&limit=<n>; по умолчанию последние 24 ч.
+    Ряды — те же объекты, что пишет dump.json: {time, sensorsData, positionData}.
+    """
+    check_auth(request)
+    if not HISTORY_DB:
+        return jsonify({"error": "history disabled: set HISTORY_DB"}), 400
+    to_raw = request.args.get("to", type=int)
+    from_raw = request.args.get("from", type=int)
+    to_ts = to_raw if to_raw is not None else int(time.time())
+    from_ts = from_raw if from_raw is not None else (to_ts - 86400)
+    limit = min(request.args.get("limit", type=int) or 10_000, 100_000)
+    return jsonify({"rows": get_history(from_ts, to_ts, limit)})
+
+
 @app.route("/tbox/<string:action>", methods=["POST"])
 def tbox_action(action):
     check_auth_rw(request)
@@ -379,6 +558,10 @@ def not_found(e):
 @app.errorhandler(405)
 def method_not_allowed(e):
     return jsonify({"error": "Method Not Allowed"}), 405
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    return jsonify({"error": e.description}), e.code
 
 @app.errorhandler(Exception)
 def handle_exception(e):
