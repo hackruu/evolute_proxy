@@ -2,3 +2,9 @@ dump.json
 evy-platform-access.txt
 evy-platform-refresh.txt
 status.json
+.env
+.venv/
+.pytest_cache/
+__pycache__/
+*.log
+history.sqlite
