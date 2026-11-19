@@ -1,10 +1,13 @@
 import os
 import json
+import math
 import time
 import logging
 import threading
 import sys
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from flask import Flask, request, jsonify, abort
 from datetime import datetime
 from flask import Response
@@ -18,37 +21,81 @@ API_KEY_RW = os.getenv("API_KEY_RW", "change_me_rw")
 TIMEOUT = int(os.getenv("TIMEOUT", 60))
 REFRESH_INTERVAL = int(os.getenv("REFRESH_INTERVAL", 600))
 SENSORS_REFRESH_INTERVAL = int(os.getenv("SENSORS_REFRESH_INTERVAL", 120))
-JSON_SUB = os.getenv("JSON_SUB", ".sensors")
+JSON_SUB = os.getenv("JSON_SUB", "")
 EVOLUTE_TOKEN_FILENAME = os.getenv("EVOLUTE_TOKEN_FILENAME", "evy-platform-access.txt")
 EVOLUTE_REFRESH_TOKEN_FILENAME = os.getenv("EVOLUTE_REFRESH_TOKEN_FILENAME", "evy-platform-refresh.txt")
-CAR_ID = os.getenv("CAR_ID", "SOME_CAR_ID_HASH_CHANGE_ME")
+# IMEI of the car's TBox — the numeric id in the telemetry URL,
+# e.g. https://app.evassist.ru/client-bff-service/telemetry/<CAR_ID>
+# (NOT the old hash-shaped car id from carV2/ links — that gets a 400 now)
+CAR_ID = os.getenv("CAR_ID", "SOME_CAR_IMEI_CHANGE_ME")
 
 current_refresh_interval = REFRESH_INTERVAL
 
 USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/144.0.0.0 Safari/537.36"
+    "Chrome/159.0.0.0 Safari/537.36"
 )
+
+# Header set copied from the web app's own XHRs (Chrome 159 on macOS) so the
+# polls look like the site's JS workers to any rate-limiter
+BROWSER_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "*/*",
+    "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8,ru;q=0.7",
+    "x-app": "web",
+    "time-zone": "3",
+    "sec-ch-ua": '"Google Chrome";v="159", "Not/A)Brand";v="8", "Chromium";v="159"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
 
 DUMP_FILE = "dump.json"
 STATUS_FILE = "status.json"
 
-EVOLUTE_REFRESH_URL = "https://app.evassist.ru/id-service/auth/refresh-token"
-EVOLUTE_SENSOR_URL = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/info"
+# The upstream LB (single IP) occasionally drops TCP connects. Retry the
+# connect phase only — the request is never sent if the connection never
+# opened, so even command POSTs are safe to retry. Read/status retries stay
+# off: resending a command body could re-fire the action.
+UPSTREAM_RETRIES = Retry(connect=2, read=0, status=0, other=0, backoff_factor=1)
+upstream = requests.Session()
+upstream.headers.update(BROWSER_HEADERS)
+upstream.mount("https://", HTTPAdapter(max_retries=UPSTREAM_RETRIES))
 
+# ETag of the last telemetry response; sent back as If-None-Match so unchanged
+# data comes back as a tiny 304, exactly like the web app's polling
+telemetry_etag = None
+
+EVOLUTE_REFRESH_URL = "https://app.evassist.ru/id-service/auth/refresh-token"
+EVOLUTE_TELEMETRY_URL = f"https://app.evassist.ru/client-bff-service/telemetry/{CAR_ID}"
+EVOLUTE_COMMANDS_URL = "https://app.evassist.ru/client-bff-service/telemetry-commands"
+
+# action: (command_name, status_source, skip_when)
+# status_source: ("sensor", key in sensorsData) | ("button", activateCommand) | None
 INTELLIGENT_ACTIONS = {
-    "lock_close": ("centralLockingToggle", "centralLockingStatus", 1),
-    "lock_open": ("centralLockingToggle", "centralLockingStatus", 0),
-    "heating_off": ("heating", "climateStatus", 0),
-    "heating_on": ("heating", "climateStatus", 1),
-    "cooling_off": ("cooling", "climateStatus", 0),
-    "cooling_on": ("cooling", "climateStatus", 1),
-    "trunk_close": ("trunkOpen", "trunkStatus", 0),
-    "trunk_open": ("trunkOpen", "trunkStatus", 1),
-    "prepare_on": ("PREPARE", "ignitionStatus", 1),
-    "prepare_off": ("CANCEL", "ignitionStatus", 0),
-    "blink": ("blink", "ready", 1),
+    "lock_close": ("centralLockingOn", ("sensor", "isCentralLockingOn"), True),
+    "lock_open": ("centralLockingOff", ("sensor", "isCentralLockingOn"), False),
+    "heating_on": ("heatingOn", ("button", "heatingOn"), True),
+    "heating_off": ("heatingOff", ("button", "heatingOn"), False),
+    "cooling_on": ("coolingOn", ("button", "coolingOn"), True),
+    "cooling_off": ("coolingOff", ("button", "coolingOn"), False),
+    "trunk_open": ("trunkOpen", ("sensor", "isTrunkOpen"), True),
+    "trunk_close": ("trunkClose", ("sensor", "isTrunkOpen"), False),
+    "prepare_on": ("PREPARE", ("sensor", "isIgnitionOn"), True),
+    "prepare_off": ("CANCEL", ("sensor", "isIgnitionOn"), False),
+    "blink": ("search", None, None),
+}
+
+# new upstream key -> legacy key kept so Home Assistant templates keep working
+SENSOR_KEY_ALIASES = {
+    "remainsFuelMileage": "remainsMileageFuel",
+    "remainsBatteryMileage": "remainsMileage",
+    "isCentralLockingOn": "centralLockingStatus",
+    "isIgnitionOn": "ignitionStatus",
+    "isTrunkOpen": "trunkStatus",
 }
 
 
@@ -109,7 +156,7 @@ def refresh_tokens():
     try:
         tokens = get_tokens()
         payload = {"refreshToken": tokens["refresh"]}
-        response = requests.post(EVOLUTE_REFRESH_URL, json=payload, timeout=TIMEOUT)
+        response = upstream.post(EVOLUTE_REFRESH_URL, json=payload, timeout=TIMEOUT)
         response.raise_for_status()
 
         data = response.json()
@@ -137,8 +184,72 @@ def refresh_tokens():
         tokens_ok = False
         logger.error(f"Failed to refresh tokens: {e}")
 
-def fetch_sensor_data():
-    global sensors_data
+def build_sensors_data(sensors, buttons=None):
+    """Map the flat upstream `sensors` dict into the legacy shape HA expects:
+    keep all new keys, add old-name aliases, coerce bools to ints, and
+    re-synthesize keys the new API dropped (home-assistant configs are frozen)."""
+    result = {}
+    for key, value in sensors.items():
+        if isinstance(value, bool):
+            value = int(value)
+        result[key] = value
+        legacy = SENSOR_KEY_ALIASES.get(key)
+        if legacy:
+            result[legacy] = result[key]
+    # old climateStatus: 1 while heating or cooling is active; upstream now
+    # reports that via the status of the corresponding UI buttons
+    climate_active = False
+    for b in buttons or []:
+        if b.get("activateCommand") in ("heatingOn", "coolingOn") and b.get("status"):
+            climate_active = True
+    result["climateStatus"] = 1 if climate_active else 0
+    # upstream dropped diagnostics entirely, but HA's frozen config renders it
+    # as the state of a sensor with unit "km" — a missing/empty value crashes
+    # that sensor's state write (non-numeric state), so keep it numeric
+    result["diagnostics"] = 0
+    return result
+
+def haversine_m(lat1, lon1, lat2, lon2):
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+# previous GPS fix, used to synthesize speed (lost on restart — first value is 0)
+last_position_fix = {}
+
+def build_position_data(sensors, payload):
+    position = {}
+    for key in ("lat", "lon", "course"):
+        if sensors.get(key) is not None:
+            position[key] = sensors[key]
+    if payload.get("positionAt"):
+        position["positionAt"] = payload["positionAt"]
+    # upstream no longer reports speed, but HA's GPS automation triggers on
+    # it — derive km/h from the distance between consecutive fixes
+    global last_position_fix
+    speed = 0.0
+    try:
+        lat = float(sensors["lat"])
+        lon = float(sensors["lon"])
+        at = payload.get("positionAt")
+        prev = last_position_fix
+        if at and prev.get("positionAt") and at > prev["positionAt"]:
+            dt_s = (at - prev["positionAt"]) / 1000.0
+            dist_m = haversine_m(prev["lat"], prev["lon"], lat, lon)
+            if dt_s > 0 and dist_m > 1:  # ignore sub-meter GPS jitter while parked
+                speed = round(dist_m / dt_s * 3.6, 1)
+        if at:
+            last_position_fix = {"lat": lat, "lon": lon, "positionAt": at}
+    except (KeyError, TypeError, ValueError):
+        pass
+    position["speed"] = speed
+    return position
+
+def fetch_sensor_data(force=False):
+    global sensors_data, telemetry_etag
     if not tokens_ok:
         logger.warning("Sensor data fetch skipped: tokens are not active")
         return
@@ -148,16 +259,36 @@ def fetch_sensor_data():
             "evy-platform-access": tokens["access"],
             "evy-platform-refresh": tokens["refresh"]
         }
-        headers = {
-            "User-Agent": USER_AGENT
-        }
-        response = requests.get(EVOLUTE_SENSOR_URL, headers=headers, cookies=cookies, timeout=TIMEOUT)
+        headers = {}
+        if telemetry_etag and not force:
+            headers["If-None-Match"] = telemetry_etag
+        response = upstream.get(EVOLUTE_TELEMETRY_URL, headers=headers, cookies=cookies, timeout=TIMEOUT)
+        if response.status_code == 304 and sensors_data:
+            # not modified — the cached snapshot is still current
+            update_status("last_sensor_update")
+            logger.info("Telemetry unchanged (304), keeping cached data")
+            return
         response.raise_for_status()
+        if response.headers.get("ETag"):
+            telemetry_etag = response.headers["ETag"]
         data = response.json()
-        keys = JSON_SUB.strip(".").split(".")
-        for k in keys:
-            data = data.get(k, {})
-        sensors_data = data
+        for k in JSON_SUB.strip(".").split("."):
+            if k:
+                data = data.get(k, {})
+        sensors = data.get("sensors", {}) if isinstance(data, dict) else {}
+        buttons = data.get("buttons", []) if isinstance(data, dict) else []
+        sensors_data = {
+            "sensorsData": build_sensors_data(sensors, buttons),
+            "positionData": build_position_data(sensors, data),
+            "meta": {
+                "isOnline": data.get("isOnline"),
+                "onlineState": data.get("onlineState"),
+                "carStateUpdatedAt": data.get("carStateUpdatedAt"),
+                "positionAt": data.get("positionAt"),
+                "buttons": data.get("buttons", []),
+                "warnings": data.get("warnings", []),
+            },
+        }
         update_status("last_sensor_update")
         write_json_file(DUMP_FILE, sensors_data)
         logger.info("Sensor data updated")
@@ -179,12 +310,14 @@ def periodic_fetch():
 def check_auth(req):
     key = req.headers.get("X-API-Key") or req.args.get("api_key")
     if key != API_KEY:
-        abort(jsonify({"error": "Unauthorized"}), 401)
+        # NB: abort(jsonify(...), 401) would silently lose the 401 status,
+        # werkzeug treats a Response as the whole response
+        abort(401, description="Unauthorized")
 
 def check_auth_rw(req):
     key = req.headers.get("X-API-Key") or req.args.get("api_key")
     if key != API_KEY_RW:
-        abort(jsonify({"error": "Unauthorized"}), 401)
+        abort(401, description="Unauthorized")
 
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -246,10 +379,26 @@ def get_all_positions():
 @app.route("/sensors/<string:sensor_name>", methods=["GET"])
 def get_single_sensor(sensor_name):
     check_auth_rw(request)
-    value = sensors_data.get(sensor_name)
+    value = sensors_data.get("sensorsData", {}).get(sensor_name)
+    if value is None:
+        value = sensors_data.get("positionData", {}).get(sensor_name)
     if value is None:
         return jsonify({"error": "sensor not found"}), 404
     return jsonify({sensor_name: value})
+
+def send_tbox_command(command_name, extra_body=None):
+    """POST a command to the new telemetry-commands endpoint, returns parsed JSON."""
+    tokens = get_tokens()
+    payload = {"commandName": command_name, "imei": CAR_ID}
+    if extra_body:
+        payload.update(extra_body)
+    cookies = {
+        "evy-platform-access": tokens["access"],
+        "evy-platform-refresh": tokens["refresh"]
+    }
+    resp = upstream.post(EVOLUTE_COMMANDS_URL, json=payload, cookies=cookies, timeout=TIMEOUT)
+    resp.raise_for_status()
+    return resp.json()
 
 @app.route("/proxy/<path:subpath>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
 def proxy(subpath):
@@ -299,29 +448,22 @@ def proxy(subpath):
 @app.route("/tbox/<string:action>", methods=["POST"])
 def tbox_action(action):
     check_auth_rw(request)
-    tokens = get_tokens()
-    target_url = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/{action}"
-
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Content-Type": "application/json"
-    }
-
-    cookies = {
-        "evy-platform-access": tokens["access"],
-        "evy-platform-refresh": tokens["refresh"]
-    }
+    extra_body = {}
+    if request.data:
+        try:
+            body = json.loads(request.get_data())
+            if isinstance(body, dict):
+                extra_body = body
+        except ValueError:
+            pass
 
     try:
-        resp = requests.post(
-            target_url,
-            headers=headers,
-            data=request.get_data(),
-            cookies=cookies,
-            timeout=TIMEOUT
-        )
-        resp.raise_for_status()
-        return jsonify({"status": "success"})
+        response_data = send_tbox_command(action, extra_body)
+        return jsonify({
+            "status": "success",
+            "commandId": response_data.get("commandId"),
+            "response": response_data,
+        })
     except Exception as e:
         logger.error(f"TBox action request failed: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -333,39 +475,38 @@ def tbox_i_action(action):
     if action not in INTELLIGENT_ACTIONS:
         return jsonify({"status": "error", "error": f"Unknown intelligent action: {action}"}), 400
 
-    endpoint, status_key, skip_if_value = INTELLIGENT_ACTIONS[action]
+    command_name, status_source, skip_when = INTELLIGENT_ACTIONS[action]
 
     try:
         fetch_sensor_data()
-        current_value = sensors_data.get("sensorsData", {}).get(status_key)
 
-        if current_value == skip_if_value:
-            logger.info(f"Intelligent action '{action}' skipped: already in desired state")
-            return jsonify({"status": "already_ok"})
+        if status_source is not None:
+            kind, key = status_source
+            if kind == "sensor":
+                current = sensors_data.get("sensorsData", {}).get(key)
+                if isinstance(current, str):
+                    current = current.lower() in ("1", "true", "on")
+                elif current is not None:
+                    current = bool(current)
+            else:  # button
+                current = None
+                for b in sensors_data.get("meta", {}).get("buttons", []):
+                    if b.get("activateCommand") == key:
+                        current = bool(b.get("status"))
+                        break
 
-        target_url = f"https://app.evassist.ru/car-service/tbox/{CAR_ID}/{endpoint}"
-        tokens = get_tokens()
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Content-Type": "application/json"
-        }
-        cookies = {
-            "evy-platform-access": tokens["access"],
-            "evy-platform-refresh": tokens["refresh"]
-        }
+            if current == skip_when:
+                logger.info(f"Intelligent action '{action}' skipped: already in desired state")
+                return jsonify({"status": "already_ok"})
 
-        resp = requests.post(
-            target_url,
-            headers=headers,
-            data=request.get_data(),
-            cookies=cookies,
-            timeout=TIMEOUT
-        )
-        resp.raise_for_status()
-        logger.info(f"Intelligent action '{action}' executed successfully")
-        fetch_sensor_data()
+        response_data = send_tbox_command(command_name)
+        logger.info(f"Intelligent action '{action}' sent as command '{command_name}'")
+        fetch_sensor_data(force=True)
 
-        return jsonify({"status": "success"})
+        return jsonify({
+            "status": "success",
+            "commandId": response_data.get("commandId"),
+        })
 
     except Exception as e:
         logger.error(f"Intelligent action '{action}' failed: {e}")
@@ -375,6 +516,10 @@ def tbox_i_action(action):
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Not found"}), 404
+
+@app.errorhandler(401)
+def unauthorized(e):
+    return jsonify({"error": "Unauthorized"}), 401
 
 @app.errorhandler(405)
 def method_not_allowed(e):
@@ -386,7 +531,7 @@ def handle_exception(e):
     return jsonify({"error": "Internal Server Error"}), 500
 
 if __name__ == "__main__":
-    if CAR_ID == "SOME_CAR_ID_HASH_CHANGE_ME":
+    if CAR_ID == "SOME_CAR_IMEI_CHANGE_ME":
         logger.error("Critical environment variable CAR_ID is not set. Exiting.")
         sys.exit(1)
 

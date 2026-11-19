@@ -11,3 +11,5 @@ rest: !include evolute_rest.yaml
 # ......
 
 sensor: !include sensors.yaml
+
+automation: !include automations.yaml

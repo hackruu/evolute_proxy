@@ -2,3 +2,4 @@ dump.json
 evy-platform-access.txt
 evy-platform-refresh.txt
 status.json
+__pycache__/
